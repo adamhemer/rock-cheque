@@ -17,6 +17,7 @@ app.use(express.static(__dirname + "/public"));
 
 var host_ip;
 var control_board_ip;
+var display_ip;
 
 var listener;
 
@@ -40,7 +41,7 @@ var sheet;
 
 
 
-var categories = [];
+var boardData = [];
 
 
 async function loadSheet() {
@@ -130,14 +131,20 @@ async function loadSheet() {
                 }
             }
             
-            categories.push(newCategory);
+            // JUST FOR TESTING, HAVE SOME QUESTIONS COMPLETE
+            for (let i = 0; i < newCategory.questions.length; i++) {
+                newCategory.questions[i].complete = !(i % 3);
+            }
+
+
+            boardData.push(newCategory);
         }
     }
 
 
 
 
-    console.log(categories[0]);
+    console.log(boardData[0]);
     //console.log(categories[0].questions);
 
 
@@ -185,16 +192,32 @@ app.post("/host", (req, res) => {
         // Register the host IP
         host_ip = req.ip
         console.log(`Host registered to IP ${host_ip}}`)
-        res.sendStatus(202);
+        res.sendStatus(200);
     } else if (req.ip != host_ip) {
         // If a non-host tries the endpoint
         console.log(`Cannot register host to IP ${req.ip}, host already registered to IP ${host_ip}}`)
-        res.sendStatus(423);
+        res.sendStatus(403);
     } else {
         // If the host tries the endpoint
         console.log(`Host already registered to IP ${host_ip}}`)
+        res.sendStatus(200);
     }
 });
+
+
+app.get("/board-data", (req, res) => {
+    if (!display_ip) {
+        display_ip = req.ip
+        console.log(`Display registered to IP ${display_ip}}`)
+        res.send(boardData);
+    } else if (req.ip === display_ip) {
+        res.send(boardData);
+    } else {
+        console.log("Illegal access attempy by " + req.ip);
+        res.sendStatus(403) // Access Forbidden
+    }
+});
+
 
 app.get("/player-stats", (req, res) => {
 
@@ -204,7 +227,7 @@ app.get("/player-stats", (req, res) => {
 app.post("/buzzer", (req, res) => {
     if (!control_board_ip) {
         control_board_ip = req.ip
-        console.log(`Buzzer control board registered to IP ${host_ip}}`)
+        console.log(`Buzzer control board registered to IP ${control_board_ip}}`)
     }
 });
 

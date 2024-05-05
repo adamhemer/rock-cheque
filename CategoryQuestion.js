@@ -105,6 +105,8 @@ class Question {
             this.playTo = playTo;
             
             this.reward = reward;
+
+            this.complete = false;
     }
 
 }
