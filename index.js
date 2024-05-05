@@ -8,6 +8,8 @@ const { ControlBoard } = require('./ControlBoard');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const { Category, Question } = require('./CategoryQuestion');
+const { Player } = require('./Player');
+const clc = require("cli-color");
 
 app.use(cors());
 app.use(express.json());
@@ -20,6 +22,8 @@ var control_board_ip;
 var display_ip;
 
 var listener;
+
+const debugAuth = true;
 
 
 const serviceAccountAuth = new JWT({
@@ -36,12 +40,43 @@ var sheet;
 
 
 
-// const controller = new ControlBoard("COM3", 115200);
-// controller.reset();
+const controller = new ControlBoard("COM3", 115200);
+controller.reset();
+
+const STATES = {
+    SETUP: 0,       // Asigning players to buzzers, choosing colours, etc
+    DEMO: 1,        // Let players try out the remotes
+    SELECTION: 2,   // On the category board
+    WAITING: 3,     // Question shown but players cant buzz yet
+    ARMED: 4,       // Players can buzz in
+    BUZZED: 5,      // A player has buzzed in
+    ANSWERED: 6,    // The question has been answered correctly, show answer
+    TIEBREAK: 7,    // Extra question for tiebreaking
+    GAMEOVER: 8     // All questions are complete, show final scores
+}
+
+
+// SETUP
 
 
 
 var boardData = [];
+var gameState = {
+    state: STATES.SELECTION,
+    players: []
+};
+
+
+// For testing frontend
+// gameState.players.push(new Player("Adam", 0, "FFAA00"));
+// gameState.players.push(new Player("Dylan", 1, "FF00FF"));
+// gameState.players.push(new Player("Koni", 3, "00FFAA"));
+// gameState.players.push(new Player("Hayley", 2, "AAFF00"));
+// gameState.players.push(new Player("Beth", 7, "0000FF"));
+// gameState.players.push(new Player("Callum", 5, "00AAFF"));
+// gameState.players.push(new Player("James", 4, "964B00"));
+// gameState.players.push(new Player("Leah", 6, "FFC0CB"));
+
 
 
 async function loadSheet() {
@@ -166,20 +201,86 @@ async function loadSheet() {
 
 }
 
-
-
-
-
-
-
 async function startServer() {
 
     await loadSheet();
 
     listener = app.listen(port, () => {
-        console.log("Server started.");
+        console.log(clc.green("Server started."));
     });
 }
+
+
+
+// controller.onChar('P', (data) => {
+//     console.log("Button pressed on " + data);
+// });
+
+// -------- SETUP --------
+
+controller.onChar('P', (data) => {
+    if (gameState.binding) {
+        let index = parseInt(data.slice(0, 1)); // Ensure only 1 digit grabbed
+
+        let existing = gameState.players.findIndex(p => p.buzzer === index);
+        if (existing >= 0) {
+            console.log(clc.redBright(`Overwriting player ${gameState.players[existing].name} with player ${gameState.binding.name} on Buzzer ${index}`));
+            gameState.players[existing] = new Player(gameState.binding.name, index, gameState.binding.colour);
+        } else {
+            console.log(clc.magentaBright(`Bound ${gameState.binding.name} to Buzzer ${index}`));
+            gameState.players.push(new Player(gameState.binding.name, index, gameState.binding.colour));
+        }
+        controller.setColour(index, gameState.binding.colour);
+        gameState.binding = null;
+    }
+});
+
+// -------- DEMO --------
+
+// -------- SELECTION --------
+
+// -------- WAITING --------
+
+
+
+// -------- ARMED --------
+
+controller.onChar('B', (data) => {
+    // Player buzzed in
+});
+
+// -------- BUZZED --------
+
+controller.onChar('L', (data) => {
+    // Player too late
+});
+
+// -------- ANSWERED --------
+
+// No commands
+
+
+app.post("/bind-player", (req, res) => {   // Create new player and set them to be bound to next button press
+    if (req.ip === host_ip || debugAuth) {
+        
+        if (!req.body.name || !req.body.colour) {
+            console.log(clc.redBright("Cannot bind player without name and colour!"))
+            res.sendStatus(200);
+            return;
+        }
+
+        gameState.binding = {
+            name: req.body.name,
+            colour: req.body.colour
+        }
+
+        console.log(clc.magentaBright(`Binding player ${req.body.name}`));
+
+        res.sendStatus(200);    // OK
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
 
 
 app.get("/", (req, res) => {
@@ -191,9 +292,9 @@ app.post("/host", (req, res) => {
     if (!host_ip) {
         // Register the host IP
         host_ip = req.ip
-        console.log(`Host registered to IP ${host_ip}}`)
+        console.log(clc.bgGreen(`Host registered to IP ${host_ip}}`))
         res.sendStatus(200);
-    } else if (req.ip != host_ip) {
+    } else if (req.ip !== host_ip) {
         // If a non-host tries the endpoint
         console.log(`Cannot register host to IP ${req.ip}, host already registered to IP ${host_ip}}`)
         res.sendStatus(403);
@@ -208,16 +309,67 @@ app.post("/host", (req, res) => {
 app.get("/board-data", (req, res) => {
     if (!display_ip) {
         display_ip = req.ip
-        console.log(`Display registered to IP ${display_ip}}`)
-        res.send(boardData);
-    } else if (req.ip === display_ip) {
+        console.log(clc.bgGreen(`Display registered to IP ${display_ip}}`))
+        res.json(boardData);
+    } else if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
         res.send(boardData);
     } else {
         console.log("Illegal access attempy by " + req.ip);
-        res.sendStatus(403) // Access Forbidden
+        res.sendStatus(403);    // Access Forbidden
     }
 });
 
+app.get("/game-state", (req, res) => {
+    if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
+        res.json(gameState);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/select-question", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        
+        if (gameState.state === STATES.SELECTION) {
+
+            let category = boardData.find(cat => cat.title === req.body.category);
+
+            if (!category) {
+                console.log(clc.redBright("Could not find selected category!"));
+                return res.sendStatus(400);
+            }
+
+            let question = category.questions.find(qu => qu.title === req.body.question);
+
+            if (!question) {
+                console.log(clc.redBright("Could not find selected question!"));
+                return res.sendStatus(400);
+            }
+
+            gameState.state = STATES.WAITING;
+            gameState.activeCategory = category;
+            gameState.activeQuestion = question;
+
+            console.log(gameState.activeCategory);
+            console.log(gameState.activeQuestion);
+        }
+
+        res.sendStatus(200);    // OK
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/modify-points", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        let player = gameState.players.find(p => p.buzzer === req.body.index);
+        player.points += req.body.points;
+        console.log(clc.redBright(`Host modified ${player.name}'s points by ${req.body.points} | ${player.points - req.body.points} -> ${player.points}`));
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
 
 app.get("/player-stats", (req, res) => {
 
