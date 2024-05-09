@@ -40,11 +40,15 @@ class ControlBoard {
     }
 
     answer(correct) {
-        this.serial.write(correct ? "Y" : "N")
+        this.serial.write(correct ? "Y" : "N");
     }
 
     reset() {
-        this.serial.write("R")
+        this.serial.write("R");
+    }
+
+    armBuzzers() {
+        this.serial.write("A");
     }
 }
 
