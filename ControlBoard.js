@@ -16,7 +16,7 @@ class ControlBoard {
 
         // this.serial.write('C0|16711680')
         // this.events = { '>': console.log };
-        console.log(this.events);
+        // console.log(this.events);
     }
 
     onChar(char, func) {    // When serial receives 'char' call func()

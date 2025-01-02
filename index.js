@@ -38,9 +38,7 @@ const serviceAccountAuth = new JWT({
 const document = new GoogleSpreadsheet('1PhDNYLUodoj0HWHkgYcoxYkg7U2j2d1WauuXQJ1QJs4', serviceAccountAuth)
 var sheet;
 
-
-
-const controller = new ControlBoard("COM3", 115200);
+const controller = new ControlBoard("COM11", 115200);
 controller.reset();
 
 let eventLog = [];
@@ -48,13 +46,12 @@ let eventLog = [];
 function log(arg, colour) {
     if (colour) {
         console.log(colour(arg));
+        eventLog.push(colour(arg));
     } else {
         console.log(arg)
+        eventLog.push(arg);
     }
-    eventLog.push(arg);
 }
-
-
 
 const STATES = {
     SETUP: 0,       // Asigning players to buzzers, choosing colours, etc
@@ -68,10 +65,13 @@ const STATES = {
     GAMEOVER: 8     // All questions are complete, show final scores
 }
 
+const MEDIA_STATES = {
+    INITIAL: 0,
+    PLAY_QUESTION: 1,
+    PLAY_ANSWER: 2,
+}
 
 // SETUP
-
-
 
 var boardData = [];
 var gameState = {
@@ -79,16 +79,18 @@ var gameState = {
     players: []
 };
 
+var mediaState = MEDIA_STATES.INITIAL;
+
 
 // For testing frontend
-gameState.players.push(new Player("Adam", 0, "FFAA00"));
-gameState.players.push(new Player("Dylan", 1, "FF00FF"));
-gameState.players.push(new Player("Koni", 3, "00FFAA"));
-gameState.players.push(new Player("Hayley", 2, "AAFF00"));
-gameState.players.push(new Player("Beth", 7, "0000FF"));
-gameState.players.push(new Player("Callum", 5, "00AAFF"));
-gameState.players.push(new Player("James", 4, "964B00"));
-gameState.players.push(new Player("Leah", 6, "FFC0CB"));
+// gameState.players.push(new Player("Adam", 0, "FFAA00"));
+// gameState.players.push(new Player("Dylan", 1, "FF00FF"));
+// gameState.players.push(new Player("Koni", 3, "00FFAA"));
+// gameState.players.push(new Player("Hayley", 2, "AAFF00"));
+// gameState.players.push(new Player("Beth", 7, "0000FF"));
+// gameState.players.push(new Player("Callum", 5, "00AAFF"));
+// gameState.players.push(new Player("James", 4, "964B00"));
+// gameState.players.push(new Player("Leah", 6, "FFC0CB"));
 
 
 
@@ -188,30 +190,6 @@ async function loadSheet() {
             boardData.push(newCategory);
         }
     }
-
-
-
-
-    // log(boardData[0]);
-    //log(categories[0].questions);
-
-
-
-    // categoryAmount = sheet.getCell(0, 0).value;
-    // questionAmount = sheet.getCell(1, 0).value;
-    // for (let i = 0; i < categoryAmount; i++) {
-    //     categoryNames[i] = sheet.getCell(2, 2 + i).value;
-    // }
-    // for (let i = 0; i < categoryAmount; i++) {
-    //     categoryQuestions[i] = [];
-    //     categoryAnswers[i] = [];
-    //     for (let j = 0; j < questionAmount; j++) {
-    //         categoryQuestions[i][j] = sheet.getCell(3 + j, 2 + i).value;
-    //         categoryAnswers[i][j] = sheet.getCell(12 + j, 2 + i).value;
-    //     }
-    // }
-
-
 }
 
 async function startServer() {
@@ -224,10 +202,9 @@ async function startServer() {
 }
 
 
-
-// controller.onChar('P', (data) => {
-//     log("Button pressed on " + data);
-// });
+//    -----========================-----
+// -----====== CONTROLLER HOOKS ======-----
+//    -----========================-----
 
 // -------- SETUP --------
 
@@ -280,6 +257,12 @@ controller.onChar('L', (data) => {
 // No commands
 
 
+
+//    -----========================-----
+// -----====== SERVER ENDPOINTS ======-----
+//    -----========================-----
+
+
 app.post("/bind-player", (req, res) => {   // Create new player and set them to be bound to next button press
     if (req.ip === host_ip || debugAuth) {
         
@@ -312,9 +295,9 @@ app.post("/host", (req, res) => {
     if (!host_ip) {
         // Register the host IP
         host_ip = req.ip
-        log(`Host registered to IP ${host_ip}}`, bgGreen)
+        log(`Host registered to IP ${host_ip}}`, clc.bgGreen)
         res.sendStatus(200);
-    } else if (req.ip !== host_ip) {
+    } else if (req.ip !== host_ip && !debugAuth) {
         // If a non-host tries the endpoint
         log(`Cannot register host to IP ${req.ip}, host already registered to IP ${host_ip}}`)
         res.sendStatus(403);
@@ -334,13 +317,14 @@ app.get("/event-log", (req, res) => {
     }
 });
 
-
 app.get("/board-data", (req, res) => {
-    if (!display_ip) {
+    if (!display_ip && req.ip !== host_ip) { // Prevent the host from being registered as the display
+        // Register the display IP
         display_ip = req.ip
         log(`Display registered to IP ${display_ip}}`, clc.bgGreen)
         res.json(boardData);
     } else if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
+        // Host and Display can access board data
         res.send(boardData);
     } else {
         log("Illegal access attempy by " + req.ip);
@@ -356,22 +340,31 @@ app.get("/game-state", (req, res) => {
     }
 });
 
+app.get("/media-state", (req, res) => {
+    if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
+        res.json(mediaState);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+
 app.post("/select-question", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         
-        if (gameState.state === STATES.SELECTION) {
+        if (gameState.state === STATES.SELECTION && req.body.category && req.body.question) {
 
             let category = boardData.find(cat => cat.title === req.body.category);
 
             if (!category) {
-                log("Could not find selected category!", redBright);
+                log("Could not find selected category!", clc.redBright);
                 return res.sendStatus(400);
             }
 
             let question = category.questions.find(qu => qu.title === req.body.question);
 
             if (!question) {
-                log("Could not find selected question!", redBright);
+                log("Could not find selected question!", clc.redBright);
                 return res.sendStatus(400);
             }
 
@@ -380,6 +373,8 @@ app.post("/select-question", (req, res) => {
             gameState.activeQuestion = question;
 
             log(`Starting question ${category.title} for ${question.reward}`);
+
+            mediaState = MEDIA_STATES.INITIAL;
 
             // log(gameState.activeCategory);
             // log(gameState.activeQuestion);
@@ -404,7 +399,7 @@ app.post("/modify-points", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         let player = gameState.players.find(p => p.buzzer === req.body.index);
         player.points += req.body.points;
-        log(`Host modified ${player.name}'s points by ${req.body.points} | ${player.points - req.body.points} -> ${player.points}`, redBright);
+        log(`Host modified ${player.name}'s points by ${req.body.points} | ${player.points - req.body.points} -> ${player.points}`, clc.redBright);
         res.sendStatus(200);
     } else {
         res.sendStatus(403);    // Access Forbidden
@@ -418,7 +413,7 @@ app.get("/player-stats", (req, res) => {
 app.post("/answer-response", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot answer a question when no question is active!"); } 
-        if (!gameState.buzzedPlayer) { res.sendStatus(200); return log("Cannot reward player when none is buzzed!", redBright); }
+        if (!gameState.buzzedPlayer) { res.sendStatus(200); return log("Cannot reward player when none is buzzed!", clc.redBright); }
 
         let correct = req.body.correct;
         let reward = gameState.activeQuestion.reward;
@@ -444,11 +439,40 @@ app.post("/answer-response", (req, res) => {
     }
 });
 
+app.post("/override-question-state", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        
+        let category = boardData.find(cat => cat.title === req.body.category);
+
+        if (!category) {
+            log("Could not find category to override!", clc.redBright);
+            return res.sendStatus(400);
+        }
+
+        let question = category.questions.find(qu => qu.title === req.body.question);
+
+        if (!question) {
+            log("Could not find question to override!", clc.redBright);
+            return res.sendStatus(400);
+        }
+
+        question.complete = req.body.complete;
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
 app.post("/activate-buzzers", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         log("Buzzers activated!", clc.magentaBright)
         gameState.state = STATES.ARMED;
         controller.armBuzzers();
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.activeQuestion.type === Question.TYPES.AUDIO) {
+            mediaState = MEDIA_STATES.PLAY_QUESTION;
+        }
+
         res.sendStatus(200);
     } else {
         res.sendStatus(403);    // Access Forbidden
@@ -457,9 +481,56 @@ app.post("/activate-buzzers", (req, res) => {
 
 app.post("/show-answer", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
-        if (!gameState.activeQuestion) { res.sendStatus(200); return log(clc.redBright("Cannot show answer when no question is active!")); } 
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot show answer when no question is active!", clc.redBright); } 
         log("Showing answer!", clc.magentaBright)
         gameState.state = STATES.ANSWERED;
+
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.activeQuestion.type === Question.TYPES.AUDIO) {
+            mediaState = MEDIA_STATES.PLAY_ANSWER;
+        }
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/rewind-media", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot rewind media when no question is active!", clc.redBright); } 
+        
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.state.activeQuestion.type === Question.TYPES.AUDIO) {
+            mediaState = MEDIA_STATES.INITIAL;
+            log("Rewinding media.", clc.magentaBright)
+        } else {
+            return log("Cannot rewind non-media question!", clc.redBright);
+        }
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/play-media", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot play media when no question is active!", clc.redBright); } 
+        
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.state.activeQuestion.type === Question.TYPES.AUDIO) {
+            if (mediaState === MEDIA_STATES.INITIAL) {
+                if (gameState.state === STATES.ANSWERED) {
+                    log("Replaying answer.", clc.magentaBright);
+                    mediaState = MEDIA_STATES.PLAY_ANSWER;
+                } else {
+                    log("Replaying question.", clc.magentaBright);
+                    mediaState = MEDIA_STATES.PLAY_QUESTION;
+                }
+            } else {
+                log("Can't play media that hasn't been rewound.");
+            }
+
+        } else {
+            return log("Cannot play non-media question!", clc.redBright);
+        }
         res.sendStatus(200);
     } else {
         res.sendStatus(403);    // Access Forbidden
