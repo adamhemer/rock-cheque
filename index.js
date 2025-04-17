@@ -10,6 +10,8 @@ const { JWT } = require('google-auth-library');
 const { Category, Question } = require('./CategoryQuestion');
 const { Player } = require('./Player');
 const clc = require("cli-color");
+const fs = require("fs");
+const { match } = require('assert');
 
 app.use(cors());
 app.use(express.json());
@@ -25,6 +27,20 @@ var listener;
 
 const debugAuth = true;
 
+function getFormattedDate() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    return `${year}${month}${day}${hours}${minutes}${seconds}`;
+}
+
+const gameID = getFormattedDate();
+const playerDataPath = gameID + ".json";
 
 const serviceAccountAuth = new JWT({
     email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -65,6 +81,8 @@ const STATES = {
     GAMEOVER: 8     // All questions are complete, show final scores
 }
 
+var buzzTime = 0;
+
 const MEDIA_STATES = {
     INITIAL: 0,
     PLAY_QUESTION: 1,
@@ -75,7 +93,7 @@ const MEDIA_STATES = {
 
 var boardData = [];
 var gameState = {
-    state: STATES.SELECTION,
+    state: STATES.SETUP,
     players: []
 };
 
@@ -92,6 +110,77 @@ var mediaState = MEDIA_STATES.INITIAL;
 // gameState.players.push(new Player("James", 4, "964B00"));
 // gameState.players.push(new Player("Leah", 6, "FFC0CB"));
 
+
+function searchFiles() {
+    fs.readdir(".", (err, files) => {
+        if (err) {
+            console.error('Error reading directory', err);
+            return;
+        }
+
+        var matchedFiles = files.filter(file => /^\d{14}/.test(file));
+        matchedFiles = matchedFiles.map(file => new Object ({ valid: true, path: file }));
+        if (matchedFiles.length > 0) {
+            for (let i = 0; i < matchedFiles.length; i++) {
+                const f = matchedFiles[i].path;
+                fs.readFileSync(f, 'utf8', (err, data) => {
+                    if (err) {
+                        log('Invalid file: ' + f);
+                    } else {
+                        log('File read successfully: ' + f);
+                        const json = JSON.parse(data);
+                        // console.log(json);
+                        json.forEach(e => {
+                            if (e.name == null || e.buzzer == null || e.colour == null || e.points == null ) {
+                                log('Invalid file: ' + f);
+                                matchedFiles[i].valid = false;
+                            }
+                        });
+                    }
+                });
+            }
+            matchedFiles.filter(file => file.valid);
+            if (matchedFiles.length > 0) {
+                console.log('Matched files with valid player data:', matchedFiles.map(file => file.path));
+            } else {
+                console.log('No files matched the format');
+            }
+        } else {
+            console.log('No files matched the format');
+        }
+        log('Loading players from ' + matchedFiles.slice(-1)[0].path);
+        loadPlayers(matchedFiles.slice(-1)[0].path);
+    });
+}
+
+function savePlayers(path) {
+    const jsonString = JSON.stringify(gameState.players, null, 2);
+
+    fs.writeFile(path, jsonString, (err) => {
+        if (err) {
+            log('Error writing to file' + err);
+        } else {
+            log('File written successfully');
+        }
+    });
+}
+
+function updateControllerColours() {
+    gameState.players.forEach(player => {
+        controller.setColour(player.buzzer, player.colour);
+    });
+}
+
+function loadPlayers(path) {
+    fs.readFile(path, 'utf8', (err, data) => {
+        if (err) {
+            log('Error writing to file' + err);
+        } else {
+            gameState.players = JSON.parse(data);
+            log('File read successfully');
+        }
+    });
+}
 
 
 async function loadSheet() {
@@ -194,10 +283,13 @@ async function loadSheet() {
 
 async function startServer() {
 
+    searchFiles();
+
     await loadSheet();
 
     listener = app.listen(port, () => {
         log("Server started.", clc.green);
+        updateControllerColours();
     });
 }
 
@@ -222,6 +314,7 @@ controller.onChar('P', (data) => {
         }
         controller.setColour(index, gameState.binding.colour);
         gameState.binding = null;
+        savePlayers(playerDataPath);
     }
 });
 
@@ -237,6 +330,7 @@ controller.onChar('P', (data) => {
 
 controller.onChar('B', (data) => { // Player buzzed in
     if (gameState.state === STATES.ARMED) {
+        buzzTime = Date.now();
         let index = parseInt(data.slice(0, 1));
         let player = gameState.players.find(p => p.buzzer === index);
         log(`${player.name} Buzzed!`);
@@ -249,6 +343,10 @@ controller.onChar('B', (data) => { // Player buzzed in
 // -------- BUZZED --------
 
 controller.onChar('L', (data) => {
+    lateBy = Date.now() - buzzTime;
+    let index = parseInt(data.slice(0, 1));
+    let player = gameState.players.find(p => p.buzzer === index);
+    log(`${player.name} buzzed ${lateBy}ms late`, clc.redBright);
     // Player too late
 });
 
@@ -340,6 +438,7 @@ app.get("/game-state", (req, res) => {
     }
 });
 
+
 app.get("/media-state", (req, res) => {
     if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
         res.json(mediaState);
@@ -406,6 +505,21 @@ app.post("/modify-points", (req, res) => {
     }
 });
 
+app.post("/start-game", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+
+        gameState.state = STATES.SELECTION;
+        gameState.activeCategory = null;
+        gameState.activeQuestion = null;
+
+        updateControllerColours();
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+})
+
 app.get("/player-stats", (req, res) => {
 
 });
@@ -432,6 +546,8 @@ app.post("/answer-response", (req, res) => {
         gameState.buzzedPlayer.points += correct ? reward : -reward;
         gameState.buzzedPlayer = null;
         controller.answer(correct);
+
+        savePlayers(playerDataPath);
 
         res.sendStatus(200);
     } else {
@@ -543,7 +659,6 @@ app.post("/buzzer", (req, res) => {
         log(`Buzzer control board registered to IP ${control_board_ip}}`)
     }
 });
-
 
 startServer()
 

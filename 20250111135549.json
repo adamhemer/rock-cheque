@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Adam",
+    "buzzer": 3,
+    "colour": "ffffff",
+    "points": 0
+  },
+  {
+    "name": "Hayley",
+    "buzzer": 2,
+    "colour": "ff1000",
+    "points": 0
+  },
+  {
+    "name": "Leah",
+    "buzzer": 1,
+    "colour": "fff800",
+    "points": 0
+  },
+  {
+    "name": "Beth",
+    "buzzer": 0,
+    "colour": "7400ff",
+    "points": 0
+  }
+]

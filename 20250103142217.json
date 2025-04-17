@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Adam",
+    "buzzer": 0,
+    "colour": "FFAA00",
+    "points": 200
+  },
+  {
+    "name": "Dylan",
+    "buzzer": 1,
+    "colour": "FF00FF",
+    "points": 0
+  },
+  {
+    "name": "Koni",
+    "buzzer": 3,
+    "colour": "00FFAA",
+    "points": 0
+  },
+  {
+    "name": "Hayley",
+    "buzzer": 2,
+    "colour": "AAFF00",
+    "points": 0
+  },
+  {
+    "name": "Beth",
+    "buzzer": 7,
+    "colour": "0000FF",
+    "points": 0
+  },
+  {
+    "name": "Callum",
+    "buzzer": 5,
+    "colour": "00AAFF",
+    "points": 0
+  },
+  {
+    "name": "James",
+    "buzzer": 4,
+    "colour": "964B00",
+    "points": 0
+  },
+  {
+    "name": "Leah",
+    "buzzer": 6,
+    "colour": "FFC0CB",
+    "points": 0
+  }
+]
