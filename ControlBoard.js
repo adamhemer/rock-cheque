@@ -16,7 +16,7 @@ class ControlBoard {
 
         // this.serial.write('C0|16711680')
         // this.events = { '>': console.log };
-        console.log(this.events);
+        // console.log(this.events);
     }
 
     onChar(char, func) {    // When serial receives 'char' call func()
@@ -40,11 +40,15 @@ class ControlBoard {
     }
 
     answer(correct) {
-        this.serial.write(correct ? "Y" : "N")
+        this.serial.write(correct ? "Y" : "N");
     }
 
     reset() {
-        this.serial.write("R")
+        this.serial.write("R");
+    }
+
+    armBuzzers() {
+        this.serial.write("A");
     }
 }
 

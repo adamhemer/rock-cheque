@@ -10,6 +10,8 @@ const { JWT } = require('google-auth-library');
 const { Category, Question } = require('./CategoryQuestion');
 const { Player } = require('./Player');
 const clc = require("cli-color");
+const fs = require("fs");
+const { match } = require('assert');
 
 app.use(cors());
 app.use(express.json());
@@ -25,6 +27,20 @@ var listener;
 
 const debugAuth = true;
 
+function getFormattedDate() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    return `${year}${month}${day}${hours}${minutes}${seconds}`;
+}
+
+const gameID = getFormattedDate();
+const playerDataPath = gameID + ".json";
 
 const serviceAccountAuth = new JWT({
     email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -38,10 +54,20 @@ const serviceAccountAuth = new JWT({
 const document = new GoogleSpreadsheet('1PhDNYLUodoj0HWHkgYcoxYkg7U2j2d1WauuXQJ1QJs4', serviceAccountAuth)
 var sheet;
 
-
-
-const controller = new ControlBoard("COM3", 115200);
+const controller = new ControlBoard("COM11", 115200);
 controller.reset();
+
+let eventLog = [];
+
+function log(arg, colour) {
+    if (colour) {
+        console.log(colour(arg));
+        eventLog.push(colour(arg));
+    } else {
+        console.log(arg)
+        eventLog.push(arg);
+    }
+}
 
 const STATES = {
     SETUP: 0,       // Asigning players to buzzers, choosing colours, etc
@@ -55,16 +81,23 @@ const STATES = {
     GAMEOVER: 8     // All questions are complete, show final scores
 }
 
+var buzzTime = 0;
+
+const MEDIA_STATES = {
+    INITIAL: 0,
+    PLAY_QUESTION: 1,
+    PLAY_ANSWER: 2,
+}
 
 // SETUP
 
-
-
 var boardData = [];
 var gameState = {
-    state: STATES.SELECTION,
+    state: STATES.SETUP,
     players: []
 };
+
+var mediaState = MEDIA_STATES.INITIAL;
 
 
 // For testing frontend
@@ -78,11 +111,82 @@ var gameState = {
 // gameState.players.push(new Player("Leah", 6, "FFC0CB"));
 
 
+function searchFiles() {
+    fs.readdir(".", (err, files) => {
+        if (err) {
+            console.error('Error reading directory', err);
+            return;
+        }
+
+        var matchedFiles = files.filter(file => /^\d{14}/.test(file));
+        matchedFiles = matchedFiles.map(file => new Object ({ valid: true, path: file }));
+        if (matchedFiles.length > 0) {
+            for (let i = 0; i < matchedFiles.length; i++) {
+                const f = matchedFiles[i].path;
+                fs.readFileSync(f, 'utf8', (err, data) => {
+                    if (err) {
+                        log('Invalid file: ' + f);
+                    } else {
+                        log('File read successfully: ' + f);
+                        const json = JSON.parse(data);
+                        // console.log(json);
+                        json.forEach(e => {
+                            if (e.name == null || e.buzzer == null || e.colour == null || e.points == null ) {
+                                log('Invalid file: ' + f);
+                                matchedFiles[i].valid = false;
+                            }
+                        });
+                    }
+                });
+            }
+            matchedFiles.filter(file => file.valid);
+            if (matchedFiles.length > 0) {
+                console.log('Matched files with valid player data:', matchedFiles.map(file => file.path));
+            } else {
+                console.log('No files matched the format');
+            }
+        } else {
+            console.log('No files matched the format');
+        }
+        log('Loading players from ' + matchedFiles.slice(-1)[0].path);
+        loadPlayers(matchedFiles.slice(-1)[0].path);
+    });
+}
+
+function savePlayers(path) {
+    const jsonString = JSON.stringify(gameState.players, null, 2);
+
+    fs.writeFile(path, jsonString, (err) => {
+        if (err) {
+            log('Error writing to file' + err);
+        } else {
+            log('File written successfully');
+        }
+    });
+}
+
+function updateControllerColours() {
+    gameState.players.forEach(player => {
+        controller.setColour(player.buzzer, player.colour);
+    });
+}
+
+function loadPlayers(path) {
+    fs.readFile(path, 'utf8', (err, data) => {
+        if (err) {
+            log('Error writing to file' + err);
+        } else {
+            gameState.players = JSON.parse(data);
+            log('File read successfully');
+        }
+    });
+}
+
 
 async function loadSheet() {
 
     await document.loadInfo();
-    // console.log(document.title);
+    // log(document.title);
 
     sheet = document.sheetsByIndex[0];
 
@@ -90,8 +194,8 @@ async function loadSheet() {
 
     await sheet.loadCells(`A1:${lastColumnLetter}${rowCount}`);
 
-    // console.log(Object.keys(sheet));
-    // console.log(sheet._rawProperties.gridProperties.columnCount);
+    // log(Object.keys(sheet));
+    // log(sheet._rawProperties.gridProperties.columnCount);
 
     const columnCount = sheet._rawProperties.gridProperties.columnCount;
 
@@ -162,59 +266,37 @@ async function loadSheet() {
                     )
 
                 } else {
-                    // console.log("INVALID TYPE");
+                    // log("INVALID TYPE");
                 }
             }
             
             // JUST FOR TESTING, HAVE SOME QUESTIONS COMPLETE
-            for (let i = 0; i < newCategory.questions.length; i++) {
-                newCategory.questions[i].complete = !(i % 3);
-            }
+            // for (let i = 0; i < newCategory.questions.length; i++) {
+            //     newCategory.questions[i].complete = !(i % 3);
+            // }
 
 
             boardData.push(newCategory);
         }
     }
-
-
-
-
-    console.log(boardData[0]);
-    //console.log(categories[0].questions);
-
-
-
-    // categoryAmount = sheet.getCell(0, 0).value;
-    // questionAmount = sheet.getCell(1, 0).value;
-    // for (let i = 0; i < categoryAmount; i++) {
-    //     categoryNames[i] = sheet.getCell(2, 2 + i).value;
-    // }
-    // for (let i = 0; i < categoryAmount; i++) {
-    //     categoryQuestions[i] = [];
-    //     categoryAnswers[i] = [];
-    //     for (let j = 0; j < questionAmount; j++) {
-    //         categoryQuestions[i][j] = sheet.getCell(3 + j, 2 + i).value;
-    //         categoryAnswers[i][j] = sheet.getCell(12 + j, 2 + i).value;
-    //     }
-    // }
-
-
 }
 
 async function startServer() {
 
+    searchFiles();
+
     await loadSheet();
 
     listener = app.listen(port, () => {
-        console.log(clc.green("Server started."));
+        log("Server started.", clc.green);
+        updateControllerColours();
     });
 }
 
 
-
-// controller.onChar('P', (data) => {
-//     console.log("Button pressed on " + data);
-// });
+//    -----========================-----
+// -----====== CONTROLLER HOOKS ======-----
+//    -----========================-----
 
 // -------- SETUP --------
 
@@ -224,14 +306,15 @@ controller.onChar('P', (data) => {
 
         let existing = gameState.players.findIndex(p => p.buzzer === index);
         if (existing >= 0) {
-            console.log(clc.redBright(`Overwriting player ${gameState.players[existing].name} with player ${gameState.binding.name} on Buzzer ${index}`));
+            log(`Overwriting player ${gameState.players[existing].name} with player ${gameState.binding.name} on Buzzer ${index}`, clc.redBright);
             gameState.players[existing] = new Player(gameState.binding.name, index, gameState.binding.colour);
         } else {
-            console.log(clc.magentaBright(`Bound ${gameState.binding.name} to Buzzer ${index}`));
+            log(`Bound ${gameState.binding.name} to Buzzer ${index}`, clc.magentaBright);
             gameState.players.push(new Player(gameState.binding.name, index, gameState.binding.colour));
         }
         controller.setColour(index, gameState.binding.colour);
         gameState.binding = null;
+        savePlayers(playerDataPath);
     }
 });
 
@@ -245,13 +328,25 @@ controller.onChar('P', (data) => {
 
 // -------- ARMED --------
 
-controller.onChar('B', (data) => {
-    // Player buzzed in
+controller.onChar('B', (data) => { // Player buzzed in
+    if (gameState.state === STATES.ARMED) {
+        buzzTime = Date.now();
+        let index = parseInt(data.slice(0, 1));
+        let player = gameState.players.find(p => p.buzzer === index);
+        log(`${player.name} Buzzed!`);
+        
+        gameState.state = STATES.BUZZED;
+        gameState.buzzedPlayer = player;
+    }
 });
 
 // -------- BUZZED --------
 
 controller.onChar('L', (data) => {
+    lateBy = Date.now() - buzzTime;
+    let index = parseInt(data.slice(0, 1));
+    let player = gameState.players.find(p => p.buzzer === index);
+    log(`${player.name} buzzed ${lateBy}ms late`, clc.redBright);
     // Player too late
 });
 
@@ -260,11 +355,17 @@ controller.onChar('L', (data) => {
 // No commands
 
 
+
+//    -----========================-----
+// -----====== SERVER ENDPOINTS ======-----
+//    -----========================-----
+
+
 app.post("/bind-player", (req, res) => {   // Create new player and set them to be bound to next button press
     if (req.ip === host_ip || debugAuth) {
         
         if (!req.body.name || !req.body.colour) {
-            console.log(clc.redBright("Cannot bind player without name and colour!"))
+            log(clc.redBright("Cannot bind player without name and colour!"))
             res.sendStatus(200);
             return;
         }
@@ -274,7 +375,7 @@ app.post("/bind-player", (req, res) => {   // Create new player and set them to 
             colour: req.body.colour
         }
 
-        console.log(clc.magentaBright(`Binding player ${req.body.name}`));
+        log(`Binding player ${req.body.name}`, clc.magentaBright);
 
         res.sendStatus(200);    // OK
     } else {
@@ -292,29 +393,39 @@ app.post("/host", (req, res) => {
     if (!host_ip) {
         // Register the host IP
         host_ip = req.ip
-        console.log(clc.bgGreen(`Host registered to IP ${host_ip}}`))
+        log(`Host registered to IP ${host_ip}}`, clc.bgGreen)
         res.sendStatus(200);
-    } else if (req.ip !== host_ip) {
+    } else if (req.ip !== host_ip && !debugAuth) {
         // If a non-host tries the endpoint
-        console.log(`Cannot register host to IP ${req.ip}, host already registered to IP ${host_ip}}`)
+        log(`Cannot register host to IP ${req.ip}, host already registered to IP ${host_ip}}`)
         res.sendStatus(403);
     } else {
         // If the host tries the endpoint
-        console.log(`Host already registered to IP ${host_ip}}`)
+        log(`Host already registered to IP ${host_ip}}`)
         res.sendStatus(200);
     }
 });
 
+app.get("/event-log", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        res.send(eventLog);
+    } else {
+        log("Illegal access attempy by " + req.ip);
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
 
 app.get("/board-data", (req, res) => {
-    if (!display_ip) {
+    if (!display_ip && req.ip !== host_ip) { // Prevent the host from being registered as the display
+        // Register the display IP
         display_ip = req.ip
-        console.log(clc.bgGreen(`Display registered to IP ${display_ip}}`))
+        log(`Display registered to IP ${display_ip}}`, clc.bgGreen)
         res.json(boardData);
     } else if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
+        // Host and Display can access board data
         res.send(boardData);
     } else {
-        console.log("Illegal access attempy by " + req.ip);
+        log("Illegal access attempy by " + req.ip);
         res.sendStatus(403);    // Access Forbidden
     }
 });
@@ -327,22 +438,32 @@ app.get("/game-state", (req, res) => {
     }
 });
 
+
+app.get("/media-state", (req, res) => {
+    if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
+        res.json(mediaState);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+
 app.post("/select-question", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         
-        if (gameState.state === STATES.SELECTION) {
+        if (gameState.state === STATES.SELECTION && req.body.category && req.body.question) {
 
             let category = boardData.find(cat => cat.title === req.body.category);
 
             if (!category) {
-                console.log(clc.redBright("Could not find selected category!"));
+                log("Could not find selected category!", clc.redBright);
                 return res.sendStatus(400);
             }
 
             let question = category.questions.find(qu => qu.title === req.body.question);
 
             if (!question) {
-                console.log(clc.redBright("Could not find selected question!"));
+                log("Could not find selected question!", clc.redBright);
                 return res.sendStatus(400);
             }
 
@@ -350,8 +471,21 @@ app.post("/select-question", (req, res) => {
             gameState.activeCategory = category;
             gameState.activeQuestion = question;
 
-            console.log(gameState.activeCategory);
-            console.log(gameState.activeQuestion);
+            log(`Starting question ${category.title} for ${question.reward}`);
+
+            mediaState = MEDIA_STATES.INITIAL;
+
+            // log(gameState.activeCategory);
+            // log(gameState.activeQuestion);
+        } else if (gameState.state > STATES.SELECTION) {
+            gameState.state = STATES.SELECTION;
+            gameState.activeQuestion.complete = true;
+            gameState.activeCategory = null;
+            gameState.activeQuestion = null;
+
+            log("Question finished.")
+
+            controller.reset();
         }
 
         res.sendStatus(200);    // OK
@@ -364,25 +498,167 @@ app.post("/modify-points", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         let player = gameState.players.find(p => p.buzzer === req.body.index);
         player.points += req.body.points;
-        console.log(clc.redBright(`Host modified ${player.name}'s points by ${req.body.points} | ${player.points - req.body.points} -> ${player.points}`));
+        log(`Host modified ${player.name}'s points by ${req.body.points} | ${player.points - req.body.points} -> ${player.points}`, clc.redBright);
         res.sendStatus(200);
     } else {
         res.sendStatus(403);    // Access Forbidden
     }
 });
 
+app.post("/start-game", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+
+        gameState.state = STATES.SELECTION;
+        gameState.activeCategory = null;
+        gameState.activeQuestion = null;
+
+        updateControllerColours();
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+})
+
 app.get("/player-stats", (req, res) => {
 
 });
 
+app.post("/answer-response", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot answer a question when no question is active!"); } 
+        if (!gameState.buzzedPlayer) { res.sendStatus(200); return log("Cannot reward player when none is buzzed!", clc.redBright); }
+
+        let correct = req.body.correct;
+        let reward = gameState.activeQuestion.reward;
+
+        if (!correct) {
+            setTimeout(() => {
+                gameState.state = STATES.ARMED;
+                controller.reset();
+                controller.armBuzzers();
+            }, 4000);
+            log(`${gameState.buzzedPlayer.name} answered incorrectly and lost ${reward} points`, clc.red)
+        } else {
+            log(`${gameState.buzzedPlayer.name} answered correctly and gained ${reward} points`, clc.green)
+        }
+
+        gameState.buzzedPlayer.points += correct ? reward : -reward;
+        gameState.buzzedPlayer = null;
+        controller.answer(correct);
+
+        savePlayers(playerDataPath);
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/override-question-state", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        
+        let category = boardData.find(cat => cat.title === req.body.category);
+
+        if (!category) {
+            log("Could not find category to override!", clc.redBright);
+            return res.sendStatus(400);
+        }
+
+        let question = category.questions.find(qu => qu.title === req.body.question);
+
+        if (!question) {
+            log("Could not find question to override!", clc.redBright);
+            return res.sendStatus(400);
+        }
+
+        question.complete = req.body.complete;
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/activate-buzzers", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        log("Buzzers activated!", clc.magentaBright)
+        gameState.state = STATES.ARMED;
+        controller.armBuzzers();
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.activeQuestion.type === Question.TYPES.AUDIO) {
+            mediaState = MEDIA_STATES.PLAY_QUESTION;
+        }
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/show-answer", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot show answer when no question is active!", clc.redBright); } 
+        log("Showing answer!", clc.magentaBright)
+        gameState.state = STATES.ANSWERED;
+
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.activeQuestion.type === Question.TYPES.AUDIO) {
+            mediaState = MEDIA_STATES.PLAY_ANSWER;
+        }
+
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/rewind-media", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot rewind media when no question is active!", clc.redBright); } 
+        
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.state.activeQuestion.type === Question.TYPES.AUDIO) {
+            mediaState = MEDIA_STATES.INITIAL;
+            log("Rewinding media.", clc.magentaBright)
+        } else {
+            return log("Cannot rewind non-media question!", clc.redBright);
+        }
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/play-media", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (!gameState.activeQuestion) { res.sendStatus(200); return log("Cannot play media when no question is active!", clc.redBright); } 
+        
+        if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.state.activeQuestion.type === Question.TYPES.AUDIO) {
+            if (mediaState === MEDIA_STATES.INITIAL) {
+                if (gameState.state === STATES.ANSWERED) {
+                    log("Replaying answer.", clc.magentaBright);
+                    mediaState = MEDIA_STATES.PLAY_ANSWER;
+                } else {
+                    log("Replaying question.", clc.magentaBright);
+                    mediaState = MEDIA_STATES.PLAY_QUESTION;
+                }
+            } else {
+                log("Can't play media that hasn't been rewound.");
+            }
+
+        } else {
+            return log("Cannot play non-media question!", clc.redBright);
+        }
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
 
 app.post("/buzzer", (req, res) => {
     if (!control_board_ip) {
         control_board_ip = req.ip
-        console.log(`Buzzer control board registered to IP ${control_board_ip}}`)
+        log(`Buzzer control board registered to IP ${control_board_ip}}`)
     }
 });
-
 
 startServer()
 
