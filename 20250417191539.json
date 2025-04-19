@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Emily",
+    "buzzer": 7,
+    "colour": "00daff",
+    "points": 200
+  },
+  {
+    "name": "Adam",
+    "buzzer": 5,
+    "colour": "ff00a9",
+    "points": 100
+  }
+]

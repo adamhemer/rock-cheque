@@ -39,9 +39,6 @@ function getFormattedDate() {
     return `${year}${month}${day}${hours}${minutes}${seconds}`;
 }
 
-const gameID = getFormattedDate();
-const playerDataPath = gameID + ".json";
-
 const serviceAccountAuth = new JWT({
     email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     key: Buffer.from(process.env.GOOGLE_PRIVATE_KEY , 'base64').toString('ascii'),
@@ -54,7 +51,7 @@ const serviceAccountAuth = new JWT({
 const document = new GoogleSpreadsheet('1PhDNYLUodoj0HWHkgYcoxYkg7U2j2d1WauuXQJ1QJs4', serviceAccountAuth)
 var sheet;
 
-const controller = new ControlBoard("COM11", 115200);
+const controller = new ControlBoard("COM4", 115200);
 controller.reset();
 
 let eventLog = [];
@@ -91,9 +88,12 @@ const MEDIA_STATES = {
 
 // SETUP
 
-var boardData = [];
+let newGameID = getFormattedDate()
 var gameState = {
+    gameID: newGameID,
+    dataPath:  newGameID + ".json",
     state: STATES.SETUP,
+    boardData: [],
     players: []
 };
 
@@ -111,50 +111,58 @@ var mediaState = MEDIA_STATES.INITIAL;
 // gameState.players.push(new Player("Leah", 6, "FFC0CB"));
 
 
-function searchFiles() {
+function searchFiles(callback) {
     fs.readdir(".", (err, files) => {
         if (err) {
             console.error('Error reading directory', err);
-            return;
+            callback(-1); // Can't read directory
         }
 
         var matchedFiles = files.filter(file => /^\d{14}/.test(file));
-        matchedFiles = matchedFiles.map(file => new Object ({ valid: true, path: file }));
+        matchedFiles = matchedFiles.map(file => new Object ({ valid: true, path: file, playerData: [] }));
         if (matchedFiles.length > 0) {
             for (let i = 0; i < matchedFiles.length; i++) {
+                // console.log(i);
                 const f = matchedFiles[i].path;
-                fs.readFileSync(f, 'utf8', (err, data) => {
-                    if (err) {
+                let data = fs.readFileSync(f, 'utf8');
+
+                const json = JSON.parse(data);
+                // console.log(json);
+                if (!json || !json.players) {
+                    log('Invalid file: ' + f);
+                    matchedFiles[i].valid = false;
+                    continue;
+                }
+                json.players.forEach(player => {
+                    if (player.name == null || player.buzzer == null || player.colour == null || player.points == null ) {
                         log('Invalid file: ' + f);
-                    } else {
-                        log('File read successfully: ' + f);
-                        const json = JSON.parse(data);
-                        // console.log(json);
-                        json.forEach(e => {
-                            if (e.name == null || e.buzzer == null || e.colour == null || e.points == null ) {
-                                log('Invalid file: ' + f);
-                                matchedFiles[i].valid = false;
-                            }
-                        });
+                        matchedFiles[i].valid = false;
                     }
+                    console.log(player)
+                    matchedFiles[i].playerData.push(player);
                 });
+
             }
-            matchedFiles.filter(file => file.valid);
+            matchedFiles = matchedFiles.filter(file => file.valid);
             if (matchedFiles.length > 0) {
                 console.log('Matched files with valid player data:', matchedFiles.map(file => file.path));
+                callback(matchedFiles);
             } else {
                 console.log('No files matched the format');
+                callback(-2); // No valid files found
             }
         } else {
             console.log('No files matched the format');
+            callback(-2); // No valid files found
         }
-        log('Loading players from ' + matchedFiles.slice(-1)[0].path);
-        loadPlayers(matchedFiles.slice(-1)[0].path);
+        // log('Loading players from ' + matchedFiles.slice(-1)[0].path);
+        // loadPlayers(matchedFiles.slice(-1)[0].path);
     });
 }
 
 function savePlayers(path) {
-    const jsonString = JSON.stringify(gameState.players, null, 2);
+    const jsonString = JSON.stringify(gameState);
+    // const jsonString = JSON.stringify(gameState.players, null, 2);
 
     fs.writeFile(path, jsonString, (err) => {
         if (err) {
@@ -166,9 +174,16 @@ function savePlayers(path) {
 }
 
 function updateControllerColours() {
-    gameState.players.forEach(player => {
-        controller.setColour(player.buzzer, player.colour);
-    });
+    if (gameState.players.length > 0) {
+
+        gameState.players.forEach(player => {
+            controller.setColour(player.buzzer, player.colour);
+        });
+    } else {
+        for (let i = 0; i < 8; i++) {
+            controller.setColour(i, "0000FF");
+        }
+    }
 }
 
 function loadPlayers(path) {
@@ -176,8 +191,11 @@ function loadPlayers(path) {
         if (err) {
             log('Error writing to file' + err);
         } else {
-            gameState.players = JSON.parse(data);
+            gameState = JSON.parse(data);
+            // gameState.players = JSON.parse(data);
             log('File read successfully');
+            console.log(gameState);
+            updateControllerColours();
         }
     });
 }
@@ -276,14 +294,14 @@ async function loadSheet() {
             // }
 
 
-            boardData.push(newCategory);
+            gameState.boardData.push(newCategory);
         }
     }
 }
 
 async function startServer() {
 
-    searchFiles();
+    // searchFiles();
 
     await loadSheet();
 
@@ -314,7 +332,7 @@ controller.onChar('P', (data) => {
         }
         controller.setColour(index, gameState.binding.colour);
         gameState.binding = null;
-        savePlayers(playerDataPath);
+        savePlayers(gameState.dataPath);
     }
 });
 
@@ -333,10 +351,18 @@ controller.onChar('B', (data) => { // Player buzzed in
         buzzTime = Date.now();
         let index = parseInt(data.slice(0, 1));
         let player = gameState.players.find(p => p.buzzer === index);
+
+        if (!player || !player.name) {
+            log(`Buzzer ${index} pressed but not bound to a player!`, clc.redBright);
+            return;
+        }
+
         log(`${player.name} Buzzed!`);
         
         gameState.state = STATES.BUZZED;
         gameState.buzzedPlayer = player;
+    } else {
+        log(`${player.name} pressed their buzzer`);
     }
 });
 
@@ -346,6 +372,12 @@ controller.onChar('L', (data) => {
     lateBy = Date.now() - buzzTime;
     let index = parseInt(data.slice(0, 1));
     let player = gameState.players.find(p => p.buzzer === index);
+
+    if (!player || !player.name) {
+        log(`Buzzer ${index} pressed but not bound to a player!`, clc.redBright);
+        return;
+    }
+
     log(`${player.name} buzzed ${lateBy}ms late`, clc.redBright);
     // Player too late
 });
@@ -401,7 +433,7 @@ app.post("/host", (req, res) => {
         res.sendStatus(403);
     } else {
         // If the host tries the endpoint
-        log(`Host already registered to IP ${host_ip}}`)
+        // log(`Host already registered to IP ${host_ip}}`)
         res.sendStatus(200);
     }
 });
@@ -420,10 +452,10 @@ app.get("/board-data", (req, res) => {
         // Register the display IP
         display_ip = req.ip
         log(`Display registered to IP ${display_ip}}`, clc.bgGreen)
-        res.json(boardData);
+        res.json(gameState.boardData);
     } else if (req.ip === display_ip || req.ip === host_ip || debugAuth) {
         // Host and Display can access board data
-        res.send(boardData);
+        res.send(gameState.boardData);
     } else {
         log("Illegal access attempy by " + req.ip);
         res.sendStatus(403);    // Access Forbidden
@@ -453,7 +485,7 @@ app.post("/select-question", (req, res) => {
         
         if (gameState.state === STATES.SELECTION && req.body.category && req.body.question) {
 
-            let category = boardData.find(cat => cat.title === req.body.category);
+            let category = gameState.boardData.find(cat => cat.title === req.body.category);
 
             if (!category) {
                 log("Could not find selected category!", clc.redBright);
@@ -547,7 +579,7 @@ app.post("/answer-response", (req, res) => {
         gameState.buzzedPlayer = null;
         controller.answer(correct);
 
-        savePlayers(playerDataPath);
+        savePlayers(gameState.dataPath);
 
         res.sendStatus(200);
     } else {
@@ -558,7 +590,7 @@ app.post("/answer-response", (req, res) => {
 app.post("/override-question-state", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
         
-        let category = boardData.find(cat => cat.title === req.body.category);
+        let category = gameState.boardData.find(cat => cat.title === req.body.category);
 
         if (!category) {
             log("Could not find category to override!", clc.redBright);
@@ -626,6 +658,45 @@ app.post("/rewind-media", (req, res) => {
         res.sendStatus(403);    // Access Forbidden
     }
 });
+
+app.get("/read-save-games", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        searchFiles((searchResult) => {
+            if (searchResult === -1) {
+                return res.send({ error: "Cannot read save directory." });
+            } else if (searchResult === -2) {
+                return res.send({ error: "No valid save files found." });
+            } else {
+                return res.send(searchResult);
+            }
+        });
+
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/save-game", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        savePlayers(gameState.dataPath);
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+app.post("/load-game", (req, res) => {
+    if (req.ip === host_ip || debugAuth) {
+        if (req.body.gameID === gameState.gameID) {
+            log("Game already loaded!", clc.redBright);
+        } else {
+            loadPlayers(req.body.path);
+        }
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }
+})
 
 app.post("/play-media", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
