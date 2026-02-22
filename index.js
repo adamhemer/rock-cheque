@@ -12,12 +12,12 @@ const { Player } = require('./Player');
 const clc = require("cli-color");
 const fs = require("fs");
 const { match } = require('assert');
+const { SerialPort, ReadlineParser } = require('serialport');
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded());
 app.use(express.static(__dirname + "/public"));
-
 
 var host_ip;
 var control_board_ip;
@@ -51,7 +51,7 @@ const serviceAccountAuth = new JWT({
 const document = new GoogleSpreadsheet('1PhDNYLUodoj0HWHkgYcoxYkg7U2j2d1WauuXQJ1QJs4', serviceAccountAuth)
 var sheet;
 
-const controller = new ControlBoard("COM4", 115200);
+const controller = new ControlBoard("COM6", 115200);
 controller.reset();
 
 let eventLog = [];
@@ -89,6 +89,7 @@ const MEDIA_STATES = {
 // SETUP
 
 let newGameID = getFormattedDate()
+log(`Created new game with ID: ${newGameID}`, clc.greenBright);
 var gameState = {
     gameID: newGameID,
     dataPath:  newGameID + ".json",
@@ -379,6 +380,7 @@ controller.onChar('L', (data) => {
     }
 
     log(`${player.name} buzzed ${lateBy}ms late`, clc.redBright);
+    player.buzzLate = lateBy;
     // Player too late
 });
 
@@ -481,7 +483,7 @@ app.get("/media-state", (req, res) => {
 
 
 app.post("/select-question", (req, res) => {
-    if (req.ip === host_ip || debugAuth) {
+    if (req.ip === host_ip || debugAuth) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
         
         if (gameState.state === STATES.SELECTION && req.body.category && req.body.question) {
 
@@ -518,6 +520,12 @@ app.post("/select-question", (req, res) => {
             log("Question finished.")
 
             controller.reset();
+
+            // reset player late
+            gameState.players.forEach(player => {
+                player.buzzLate = null;
+            });
+            
         }
 
         res.sendStatus(200);    // OK
@@ -539,6 +547,11 @@ app.post("/modify-points", (req, res) => {
 
 app.post("/start-game", (req, res) => {
     if (req.ip === host_ip || debugAuth) {
+
+        if (gameState.players.length <= 0) {
+            res.sendStatus(200);
+            return log("Cannot start the game with no players!", clc.redBright);
+        }
 
         gameState.state = STATES.SELECTION;
         gameState.activeCategory = null;
@@ -574,6 +587,11 @@ app.post("/answer-response", (req, res) => {
         } else {
             log(`${gameState.buzzedPlayer.name} answered correctly and gained ${reward} points`, clc.green)
         }
+
+        // reset player late
+        gameState.players.forEach(player => {
+            player.buzzLate = null;
+        });
 
         gameState.buzzedPlayer.points += correct ? reward : -reward;
         gameState.buzzedPlayer = null;
@@ -617,6 +635,11 @@ app.post("/activate-buzzers", (req, res) => {
         log("Buzzers activated!", clc.magentaBright)
         gameState.state = STATES.ARMED;
         controller.armBuzzers();
+        // reset player late
+        gameState.players.forEach(player => {
+            player.buzzLate = null;
+        });
+
         if (gameState.activeQuestion.type === Question.TYPES.VIDEO || gameState.activeQuestion.type === Question.TYPES.AUDIO) {
             mediaState = MEDIA_STATES.PLAY_QUESTION;
         }
@@ -721,6 +744,42 @@ app.post("/play-media", (req, res) => {
         res.sendStatus(200);
     } else {
         res.sendStatus(403);    // Access Forbidden
+    }
+});
+
+/**
+ * Missing features:
+ *  Game over - show scores
+ *  Reset game
+ */
+
+app.post("/game-over", (req, res) => {
+    if (req.ip == host_ip || debugAuth) {
+        if (!gameState.state == STATES.SELECTION) {
+            res.sendStatus(200);
+            return log("Game can only be ended when board is shown!", clc.redBright);
+        }
+
+        gameState.state = STATES.GAMEOVER;
+        log("Game over, showing scores!", clc.magentaBright);
+    }
+});
+
+app.post("/reset-game", (req, res) => {
+    if (req.ip == host_ip || debugAuth) {
+
+        newGameID = getFormattedDate()
+        log("=== RESET!! ===", clc.redBright);
+        log(`Created new game with ID: ${newGameID}`, clc.greenBright);
+
+        gameState = {
+            gameID: newGameID,
+            dataPath:  newGameID + ".json",
+            state: STATES.SETUP,
+            boardData: [],
+            players: []
+        };
+        mediaState = MEDIA_STATES.INITIAL;
     }
 });
 
