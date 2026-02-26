@@ -11,7 +11,8 @@ const TYPES = {
     TEXT: "Text",
     IMAGE: "Image",
     VIDEO: "Video",
-    AUDIO: "Audio"
+    AUDIO: "Audio",
+    END: "End"
 }
 
 class Question {

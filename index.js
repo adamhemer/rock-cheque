@@ -221,83 +221,101 @@ async function loadSheet() {
     // ================ SCAN AND PARSE CATEGORIES AND QUESTIONS ================
     // Identify categories
     for (let i = 0; i < columnCount; i++) {
-        const cell = sheet.getCell(0, i);
-        if (cell.value !== null) {
-            // New category found!
-            let newCategory = new Category(cell.value);
+        
+        for (let c = 0; c < Math.floor(rowCount / 10); c++) {
+            const row = 10 * c;
+            const cell = sheet.getCell(row, i);
 
-            for (let j = 0; j < rowCount - 2; j++) {
+            if (cell.value !== null) {
+                // New category found!
+                let newCategory = new Category(cell.value);
 
-                let type = sheet.getCell(2 + j, i).value;
+                for (let j = row; j < rowCount - 2; j++) {
 
-                if (type === Question.TYPES.TEXT) {
-                    newCategory.questions.push(new Question.QuestionBuilder()
-                        .pointReward(sheet.getCell(2 + j, i + 1).value)
-                        .withText(sheet.getCell(2 + j, i + 2).value)
-                        .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
-                        .build()
-                    )
-                } else if (type === Question.TYPES.IMAGE) {
-                    
-                    let sources = sheet.getCell(2 + j, i + 4).value.split(', ');
-                    let questionImage = sources[0];             // First value
-                    let answerImage = sources.slice(-1)[0];     // Last value (will be same as first for n=1)
+                    let type = sheet.getCell(2 + j, i).value;
 
-                    newCategory.questions.push(new Question.QuestionBuilder()
-                        .pointReward(sheet.getCell(2 + j, i + 1).value)
-                        .withText(sheet.getCell(2 + j, i + 2).value)
-                        .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
-                        .withImage(questionImage)
-                        .withImageAnswer(answerImage)
-                        .build()
-                    )
+                    if (type === Question.TYPES.TEXT) {
+                        newCategory.questions.push(new Question.QuestionBuilder()
+                            .pointReward(sheet.getCell(2 + j, i + 1).value)
+                            .withText(sheet.getCell(2 + j, i + 2).value)
+                            .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
+                            .build()
+                        )
+                    } else if (type === Question.TYPES.IMAGE) {
+                        
+                        let sources = sheet.getCell(2 + j, i + 4).value.split(', ');
+                        let questionImage = sources[0];             // First value
+                        let answerImage = sources.slice(-1)[0];     // Last value (will be same as first for n=1)
 
-                } else if (type === Question.TYPES.VIDEO) {
-                    
-                    let parameters = sheet.getCell(2 + j, i + 5).value.split(', ');
-                    let startAt = parameters[0];                // Start video at this time
-                    let pauseAt = parameters[1];                // Pause video here for question
+                        newCategory.questions.push(new Question.QuestionBuilder()
+                            .pointReward(sheet.getCell(2 + j, i + 1).value)
+                            .withText(sheet.getCell(2 + j, i + 2).value)
+                            .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
+                            .withImage(questionImage)
+                            .withImageAnswer(answerImage)
+                            .build()
+                        )
 
-                    newCategory.questions.push(new Question.QuestionBuilder()
-                        .pointReward(sheet.getCell(2 + j, i + 1).value)
-                        .withText(sheet.getCell(2 + j, i + 2).value)
-                        .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
-                        .withVideo(sheet.getCell(2 + j, i + 4).value)
-                        .startAt(startAt)
-                        .pauseAt(pauseAt)
-                        .build()
-                    )
+                    } else if (type === Question.TYPES.VIDEO) {
+                        
+                        let parameters = sheet.getCell(2 + j, i + 5).value.split(', ');
+                        let startAt = parameters[0];                // Start video at this time
+                        let pauseAt = parameters[1];                // Pause video here for question
 
-                } else if (type === Question.TYPES.AUDIO) {
-                    
-                    let parameters = sheet.getCell(2 + j, i + 5).value.split(', ');
-                    let startAt = parameters[0];                // Start audio at this time
-                    let pauseAt = parameters[1];                // Pause audio here for question
+                        newCategory.questions.push(new Question.QuestionBuilder()
+                            .pointReward(sheet.getCell(2 + j, i + 1).value)
+                            .withText(sheet.getCell(2 + j, i + 2).value)
+                            .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
+                            .withVideo(sheet.getCell(2 + j, i + 4).value)
+                            .startAt(startAt)
+                            .pauseAt(pauseAt)
+                            .build()
+                        )
 
-                    newCategory.questions.push(new Question.QuestionBuilder()
-                        .pointReward(sheet.getCell(2 + j, i + 1).value)
-                        .withText(sheet.getCell(2 + j, i + 2).value)
-                        .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
-                        .withAudio(sheet.getCell(2 + j, i + 4).value)
-                        .startAt(startAt)
-                        .pauseAt(pauseAt)
-                        .build()
-                    )
+                    } else if (type === Question.TYPES.AUDIO) {
+                        
+                        let parameters = sheet.getCell(2 + j, i + 5).value.split(', ');
+                        let startAt = parameters[0];                // Start audio at this time
+                        let pauseAt = parameters[1];                // Pause audio here for question
 
-                } else {
-                    // log("INVALID TYPE");
+                        newCategory.questions.push(new Question.QuestionBuilder()
+                            .pointReward(sheet.getCell(2 + j, i + 1).value)
+                            .withText(sheet.getCell(2 + j, i + 2).value)
+                            .withTextAnswer(sheet.getCell(2 + j, i + 3).value)
+                            .withAudio(sheet.getCell(2 + j, i + 4).value)
+                            .startAt(startAt)
+                            .pauseAt(pauseAt)
+                            .build()
+                        )
+
+                    } else if (type === Question.TYPES.END) {
+                        break;
+                    } else {
+                        // log("INVALID TYPE");
+                    }
                 }
+                
+                // JUST FOR TESTING, HAVE SOME QUESTIONS COMPLETE
+                // for (let i = 0; i < newCategory.questions.length; i++) {
+                //     newCategory.questions[i].complete = !(i % 3);
+                // }
+
+
+                gameState.boardData.push(newCategory);
             }
-            
-            // JUST FOR TESTING, HAVE SOME QUESTIONS COMPLETE
-            // for (let i = 0; i < newCategory.questions.length; i++) {
-            //     newCategory.questions[i].complete = !(i % 3);
-            // }
-
-
-            gameState.boardData.push(newCategory);
         }
     }
+
+    for (let i = 0; i < gameState.boardData.length; i++) {
+        let cat = gameState.boardData[i];
+        log(`ID: ${i} | ${cat.title} with ${cat.questions.length} questions.`, clc.greenBright);
+    }
+
+    const selectedCategories = [0, 9, 28];
+    gameState.boardData = gameState.boardData.filter((cat, index) => selectedCategories.includes(index));
+
+    console.log(gameState.boardData);
+
 }
 
 async function startServer() {
