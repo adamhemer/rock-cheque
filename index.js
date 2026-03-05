@@ -311,10 +311,18 @@ async function loadSheet() {
         log(`ID: ${i} | ${cat.title} with ${cat.questions.length} questions.`, clc.greenBright);
     }
 
-    const selectedCategories = [0, 9, 28];
-    gameState.boardData = gameState.boardData.filter((cat, index) => selectedCategories.includes(index));
+    // ====================================================================================================================================================
+    const selectedCategories = [2, 9, 11, 28];
+    // ====================================================================================================================================================
 
-    console.log(gameState.boardData);
+    gameState.boardData = gameState.boardData.filter((cat, index) => selectedCategories.includes(index));
+    // list questions and answers
+    gameState.boardData.forEach(category => {
+        log(`Category: ${category.title}`, clc.cyanBright);
+        category.questions.forEach(question => {
+            log(`  Question: ${question.title} | Answer: ${question.answer} | Src: ${question.src} | Ans Src: ${question.answer_src}`, clc.blueBright);
+        });
+    });
 
 }
 
@@ -501,6 +509,7 @@ app.get("/media-state", (req, res) => {
 
 
 app.post("/select-question", (req, res) => {
+    log(`Received request to select question ${req.body.question} in category ${req.body.category} from IP ${req.ip}`, clc.blueBright);
     if (req.ip === host_ip || debugAuth) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
         
         if (gameState.state === STATES.SELECTION && req.body.category && req.body.question) {
@@ -780,6 +789,9 @@ app.post("/game-over", (req, res) => {
 
         gameState.state = STATES.GAMEOVER;
         log("Game over, showing scores!", clc.magentaBright);
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
     }
 });
 
@@ -798,15 +810,40 @@ app.post("/reset-game", (req, res) => {
             players: []
         };
         mediaState = MEDIA_STATES.INITIAL;
+    } else {
+        res.sendStatus(403);    // Access Forbidden
     }
 });
 
-app.post("/buzzer", (req, res) => {
-    if (!control_board_ip) {
-        control_board_ip = req.ip
-        log(`Buzzer control board registered to IP ${control_board_ip}}`)
+app.post("/reset-controllers", (req, res) => {
+    if (req.ip == host_ip || debugAuth) {
+        controller.reset();
+        log("Controllers reset!", clc.magentaBright);
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(403);    // Access Forbidden
+    }   
+});
+
+app.post("/reset-to-selection", (req, res) => {
+    if (req.ip == host_ip || debugAuth) {
+        gameState.state = STATES.SELECTION;
+        gameState.activeQuestion.complete = true;
+        gameState.activeCategory = null;
+        gameState.activeQuestion = null;
+    } else {
+        res.sendStatus(403);    // Access Forbidden
     }
 });
+
+
+
+// app.post("/buzzer", (req, res) => {
+//     if (!control_board_ip) {
+//         control_board_ip = req.ip
+//         log(`Buzzer control board registered to IP ${control_board_ip}}`)
+//     }
+// });
 
 startServer()
 
